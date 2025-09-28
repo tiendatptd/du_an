@@ -16,8 +16,11 @@ import org.springframework.web.bind.annotation.RestController;
 import com.kopi.kopi.dto.JwtLoginRequest;
 import com.kopi.kopi.security.UserPrincipal;
 import com.kopi.kopi.security.JwtTokenProvider;
-
+import com.kopi.kopi.entity.Role;
+import com.kopi.kopi.entity.User;
 import java.util.Map;
+import java.util.Optional;
+
 
 @RestController
 @RequestMapping("/apiv1/auth")
@@ -38,7 +41,8 @@ public class AuthController {
 			SecurityContextHolder.getContext().setAuthentication(authentication);
 
 			UserPrincipal principal = (UserPrincipal) authentication.getPrincipal();
-			int roleNumber = principal.getUser().getRole() != null && principal.getUser().getRole().getRoleId() != null
+            User user = principal.getUser();
+            int roleNumber = principal.getUser().getRole() != null && principal.getUser().getRole().getRoleId() != null
 				? principal.getUser().getRole().getRoleId()
 				: 1;
 			String token = jwtTokenProvider.generateToken(
@@ -50,13 +54,19 @@ public class AuthController {
 				request.isRememberMe()
 			);
 
-			return ResponseEntity.ok(Map.of(
-				"data", Map.of("token", token)
-			));
-		} catch (BadCredentialsException ex) {
-			return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body("Sai tài khoản hoặc mật khẩu");
-		}
-	}
+            //  xác định đường dẫn điều hướng theo vai trò
+            String redirectPath = resolveRedirectPath(user);
+
+            return ResponseEntity.ok(Map.of(
+                    "data", Map.of(
+                            "token", token,
+                            "redirectPath", redirectPath // trả về redirectPath để FE điều hướng
+                    )
+            ));
+        } catch (BadCredentialsException ex) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body("Sai tài khoản hoặc mật khẩu");
+        }
+    }
 
 	@DeleteMapping("/logout")
 	public ResponseEntity<?> logout() {
@@ -67,4 +77,19 @@ public class AuthController {
 	public ResponseEntity<?> logoutPost() {
 		return ResponseEntity.ok(Map.of("message", "logged out"));
 	}
-} 
+    // helper map ROLE -> path
+    private String resolveRedirectPath(User user) {
+        String roleName = Optional.ofNullable(user.getRole())
+                .map(Role::getName)
+                .map(String::toUpperCase)
+                .orElse("CUSTOMER");
+
+        // Yêu cầu leader: EMPLOYEE -> POS; ADMIN -> AdminDashboard; CUSTOMER -> Menu
+        // Dữ liệu seed hiện dùng "STAFF" thay cho "EMPLOYEE" => map STAFF = EMPLOYEE
+        return switch (roleName) {
+            case "ADMIN" -> "/admin/dashboard"; // chưa có 
+            case "STAFF", "EMPLOYEE" -> "/employee/pos"; // chưa có
+            default -> "/"; // home
+        };
+    }
+}
